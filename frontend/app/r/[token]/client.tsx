@@ -72,6 +72,7 @@ export default function RoomClient({ token, ownerToken }: { token: string; owner
 const [deletingRoom, setDeletingRoom] = useState(false);
 const [fileToDelete, setFileToDelete] = useState<FileView | null>(null);
 const [deletingFile, setDeletingFile] = useState(false);
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
 
 
   useEffect(() => {
@@ -837,7 +838,7 @@ const [deletingFile, setDeletingFile] = useState(false);
 
             {!isOwner && (
               <button
-                onClick={onLeaveRoom}
+                onClick={() => setLeaveDialogOpen(true)}
                 className="btn-outline lift flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition"
               >
                 <LogOut size={16} /> Leave room
@@ -858,6 +859,11 @@ const [deletingFile, setDeletingFile] = useState(false);
   onCancel={() => setFileToDelete(null)}
   onConfirm={() => void onConfirmDeleteFile()}
 />
+<LeaveRoomDialog
+  open={leaveDialogOpen}
+  onCancel={() => setLeaveDialogOpen(false)}
+  onConfirm={onLeaveRoom}
+/> 
     </main>
   );
 }
@@ -1094,6 +1100,58 @@ function DeleteFileDialog({
             className="banner-danger lift rounded-xl px-4 py-2.5 text-sm font-semibold transition hover:opacity-85 disabled:opacity-50"
           >
             {busy ? "Deleting…" : "Delete file"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LeaveRoomDialog({
+  open,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center p-4 backdrop-blur-sm"
+      style={{ background: "rgba(15, 6, 6, 0.55)" }}
+      role="presentation"
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="leave-room-title"
+        className="surface-solid reveal w-full max-w-md rounded-3xl p-6 shadow-2xl"
+      >
+        <div className="chip grid h-11 w-11 place-items-center rounded-2xl">
+          <LogOut size={20} />
+        </div>
+        <h2 id="leave-room-title" className="font-display mt-4 text-xl font-semibold">
+          Leave this room?
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
+          You can rejoin later with the room link or code, but any unsaved activity on this page will be lost.
+        </p>
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="btn-outline lift rounded-xl px-4 py-2.5 text-sm font-semibold transition"
+          >
+            Stay in room
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="banner-danger lift rounded-xl px-4 py-2.5 text-sm font-semibold transition hover:opacity-85"
+          >
+            Leave room
           </button>
         </div>
       </div>
