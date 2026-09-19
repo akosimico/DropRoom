@@ -569,31 +569,31 @@ const [deletingFile, setDeletingFile] = useState(false);
   const expiringSoon = secondsLeft < 300;
 
   return (
-    <main className="app-shell w-full flex-1 px-4 py-7 sm:px-6 sm:py-10">
-      <div className="mx-auto max-w-6xl">
+    <main className="app-shell w-full min-w-0 flex-1 overflow-x-hidden px-4 py-7 sm:px-6 sm:py-10">
+      <div className="mx-auto min-w-0 max-w-6xl">
         <TopBar compact />
         <div className="surface reveal mt-4 rounded-3xl p-5 sm:p-7">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="chip inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-widest">
+          <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <p className="chip inline-flex max-w-full items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-widest">
                 <span className="grid h-5 w-5 place-items-center rounded-full">
                   {isOwner ? <Crown size={12} /> : <UsersRound size={12} />}
                 </span>
                 {isOwner ? "You're the owner" : "Guest"} · code {state.room.roomCode}
               </p>
-              <h1 className="font-display mt-2 text-3xl font-semibold tracking-tight">
+              <h1 className="font-display mt-2 break-words text-3xl font-semibold tracking-tight">
                 {state.room.name ?? "Untitled room"}
               </h1>
             </div>
-            <div className="ml-auto flex flex-col items-end text-right">
-              <p className="flex items-center justify-end gap-1.5 text-sm text-[var(--text-muted)]">
+            <div className="flex min-w-0 flex-col items-start text-left sm:ml-auto sm:items-end sm:text-right">
+              <p className="flex flex-wrap items-center gap-1.5 text-sm text-[var(--text-muted)] sm:justify-end">
                 <Clock3 size={15} /> Expires in{" "}
                 <span className="font-mono font-semibold text-[var(--text)]">{formatCountdown(secondsLeft)}</span>
               </p>
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2 flex w-full gap-2 sm:w-auto">
                 <button
                   onClick={() => void copyShareLink()}
-                  className="btn-outline lift mt-2 flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition"
+                  className="btn-outline lift flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition"
                 >
                   <Copy size={15} /> Copy invite
                 </button>
@@ -622,9 +622,9 @@ const [deletingFile, setDeletingFile] = useState(false);
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <section className="space-y-4">
-            <div className="surface reveal-delay rounded-3xl p-5 sm:p-6">
-              <div className="flex items-center justify-between">
-                <h2 className="font-display flex items-center gap-2 font-semibold">
+            <div className="surface reveal-delay min-w-0 rounded-3xl p-5 sm:p-6">
+              <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="font-display flex min-w-0 items-center gap-2 font-semibold">
                   <span className="chip grid h-9 w-9 place-items-center rounded-xl">
                     <FileUp size={18} />
                   </span>
@@ -634,7 +634,7 @@ const [deletingFile, setDeletingFile] = useState(false);
                   </span>
                 </h2>
                 {canUpload && (
-                  <label className="btn-primary lift flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition">
+                  <label className="btn-primary lift flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition sm:w-auto">
                     <FileUp size={16} />
                     {uploading ? "Uploading…" : "Upload files"}
                     <input
@@ -678,7 +678,7 @@ const [deletingFile, setDeletingFile] = useState(false);
               ) : (
                 <ul className="mt-4 divide-y" style={{ borderColor: "var(--border)" }}>
                   {state.files.map((f) => (
-                    <li key={f.id} className="flex items-center gap-3 py-3" style={{ borderColor: "var(--border)" }}>
+                    <li key={f.id} className="flex min-w-0 flex-col items-stretch gap-2 py-3 sm:flex-row sm:items-center" style={{ borderColor: "var(--border)" }}>
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-medium">{f.originalFilename}</p>
                         <p className="text-xs text-[var(--text-muted)]">
@@ -689,7 +689,7 @@ const [deletingFile, setDeletingFile] = useState(false);
                       {canDownload ? (
                         <a
                           href={api.downloadUrl(token, f.id)}
-                          className="btn-outline lift flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition"
+                          className="btn-outline lift flex w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition sm:w-auto"
                         >
                           <Download size={15} /> Download
                         </a>
@@ -912,7 +912,7 @@ function ChatPanel({
   }
 
   return (
-    <section className="surface rounded-3xl p-5">
+    <section className="surface min-w-0 rounded-3xl p-5">
       <h2 className="font-display flex items-center gap-2 font-semibold">
         <MessageCircle size={18} style={{ color: "var(--accent)" }} /> Chat
       </h2>
@@ -933,12 +933,12 @@ function ChatPanel({
           </div>
         ))}
       </div>
-      <form onSubmit={submit} className="mt-2 flex gap-2">
+      <form onSubmit={submit} className="mt-2 flex min-w-0 gap-2">
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           maxLength={1000}
-          className={field + " flex-1 rounded-xl px-3 py-2.5"}
+          className={field + " min-w-0 flex-1 rounded-xl px-3 py-2.5"}
           placeholder="Type a message…"
         />
         <button type="submit" className="btn-primary lift rounded-xl px-3 py-2 text-sm font-semibold transition">
