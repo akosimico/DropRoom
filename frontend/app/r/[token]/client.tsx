@@ -687,25 +687,27 @@ const [deletingFile, setDeletingFile] = useState(false);
                           {f.downloadCount} download{f.downloadCount === 1 ? "" : "s"}
                         </p>
                       </div>
-                      {canDownload ? (
-                        <a
-                          href={api.downloadUrl(token, f.id)}
-                          className="btn-outline lift flex w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition sm:w-auto"
-                        >
-                          <Download size={15} /> Download
-                        </a>
-                      ) : (
-                        <span className="text-xs text-[var(--text-muted)]">downloads off</span>
-                      )}
-                      {isOwner && (
-  <button
-    onClick={() => setFileToDelete(f)}
-    className="banner-danger grid h-9 w-9 place-items-center rounded-xl transition hover:opacity-80"
-    aria-label={`Delete ${f.originalFilename}`}
-  >
-    <Trash2 size={16} />
-  </button>
-)}
+                      <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
+                        {canDownload ? (
+                          <a
+                            href={api.downloadUrl(token, f.id)}
+                            className="btn-outline lift flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition sm:flex-none"
+                          >
+                            <Download size={15} /> Download
+                          </a>
+                        ) : (
+                          <span className="flex-1 text-xs text-[var(--text-muted)] sm:flex-none">downloads off</span>
+                        )}
+                        {isOwner && (
+                          <button
+                            onClick={() => setFileToDelete(f)}
+                            className="banner-danger grid h-9 w-9 shrink-0 place-items-center rounded-xl transition hover:opacity-80"
+                            aria-label={`Delete ${f.originalFilename}`}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>
