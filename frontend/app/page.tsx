@@ -112,9 +112,6 @@ export default function Home() {
           >
             About
           </a>
-          <span className="hidden items-center gap-2 text-sm text-[var(--text-muted)] sm:flex">
-            <ShieldCheck size={17} /> Private by default
-          </span>
           <ThemeToggle />
         </div>
       </nav>
