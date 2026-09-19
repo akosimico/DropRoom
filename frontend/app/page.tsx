@@ -53,6 +53,7 @@ export default function Home() {
   const [joinCode, setJoinCode] = useState("");
   const [joinName, setJoinName] = useState("");
   const [joinPassword, setJoinPassword] = useState("");
+  const [showStartupNotice, setShowStartupNotice] = useState(true);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -95,6 +96,42 @@ export default function Home() {
 
   return (
     <main className="app-shell overflow-hidden">
+      {showStartupNotice && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center p-4 backdrop-blur-sm"
+          style={{ background: "rgba(15, 6, 6, 0.55)" }}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="startup-notice-title"
+            className="surface-solid reveal w-full max-w-md rounded-3xl p-6 shadow-2xl sm:p-7"
+          >
+            <div className="chip grid h-11 w-11 place-items-center rounded-2xl">
+              <Clock3 size={20} />
+            </div>
+            <h2 id="startup-notice-title" className="font-display mt-4 text-xl font-semibold">
+              The first request may take a moment
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
+              DropRoom&apos;s backend runs on Render&apos;s free plan. When it has been quiet for a
+              while, it may briefly go to sleep. Creating or joining a room can take a few seconds
+              while it wakes up.
+            </p>
+            <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
+              Thanks for your patience. Once it is awake, everything should feel normal.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowStartupNotice(false)}
+              className="btn-primary lift mt-6 w-full rounded-xl px-4 py-3 font-semibold transition"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
       {/* ---------- nav ---------- */}
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-5 py-6 sm:px-8">
         <div className="flex items-center gap-0 font-display text-lg font-semibold tracking-tight">
