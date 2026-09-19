@@ -47,6 +47,22 @@ export interface FileView {
   createdAt: string;
 }
 
+export interface UploadSessionCreated {
+  uploadId: number;
+  filename: string;
+  totalSizeBytes: number;
+  totalChunks: number;
+  chunkSizeBytes: number;
+}
+
+export interface UploadSessionStatus {
+  uploadId: number;
+  filename: string;
+  totalSizeBytes: number;
+  receivedBytes: number;
+  status: string;
+}
+
 export interface MessageView {
   id: number;
   displayName: string | null;
@@ -87,6 +103,7 @@ export type WsEvent =
   | { type: "USER_JOINED"; payload: { sessionId: string; displayName: string | null; role: string } }
   | { type: "USER_LEFT"; payload: { sessionId: string; displayName: string | null } }
   | { type: "FILE_UPLOAD_COMPLETED"; payload: { file: FileView } }
+  | { type: "FILE_UPLOAD_PROGRESS"; payload: { fileId: number; receivedBytes: number; totalSizeBytes: number; filename: string } }
   | { type: "FILE_DELETED"; payload: { fileId: number } }
   | { type: "FILE_DOWNLOADED"; payload: { fileId: number; downloadCount: number } }
   | { type: "ROOM_SETTINGS_CHANGED"; payload: { room: RoomView } }

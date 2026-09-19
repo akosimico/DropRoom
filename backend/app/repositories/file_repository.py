@@ -73,7 +73,7 @@ async def list_confirmed_files(session: AsyncSession, room_id: int) -> Sequence[
     return list(result.scalars().all())
 
 
-async def list_all_storage_keys(session: AsyncSession, room_id: int) -> Sequence[str]:
+async def list_room_storage_keys(session: AsyncSession, room_id: int) -> Sequence[str]:
     """Return all storage keys in the room (including DELETED-pending, so object
     cleanup can also sweep files whose metadata was already flipped)."""
     result = await session.execute(
@@ -84,3 +84,31 @@ async def list_all_storage_keys(session: AsyncSession, room_id: int) -> Sequence
 
 async def delete_file_records(session: AsyncSession, room_id: int) -> None:
     await session.execute(sa_delete(FileRecord).where(FileRecord.room_id == room_id))
+
+
+async def list_deleted_records(session: AsyncSession, limit: int = 500) -> Sequence[FileRecord]:
+    result = await session.execute(
+        select(FileRecord)
+        .where(FileRecord.status == FileStatus.DELETED.value)
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def list_stale_pending(
+    session: AsyncSession, before, limit: int = 500
+) -> Sequence[FileRecord]:
+    result = await session.execute(
+        select(FileRecord)
+        .where(
+            FileRecord.status == FileStatus.PENDING.value,
+            FileRecord.created_at < before,
+        )
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def list_all_storage_keys(session: AsyncSession) -> set[str]:
+    result = await session.execute(select(FileRecord.storage_key))
+    return set(result.scalars().all())

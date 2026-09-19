@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     max_files_per_room: int = 100
     max_message_length: int = 1000
     chat_scrollback: int = 200
+    upload_chunk_size_bytes: int = 8 * 1024 * 1024
+
+    # --- Background jobs (Phase 4) ---
+    job_workers: int = 4
+    job_max_attempts: int = 3
+    job_backoff_base_seconds: float = 1.0
+    job_backoff_max_seconds: float = 60.0
+    job_orphan_sweep_limit: int = 200
 
     # --- Rate limiting (in-memory fixed window for MVP; Redis later) ---
     rate_limit_enabled: bool = True

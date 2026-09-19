@@ -4,6 +4,20 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
+  Clock3,
+  Copy,
+  Crown,
+  Download,
+  FileUp,
+  Flame,
+  LogOut,
+  MessageCircle,
+  Settings2,
+  Trash2,
+  UsersRound,
+} from "lucide-react";
+import {
   api,
   ApiError,
   formatBytes,
@@ -12,10 +26,13 @@ import {
   wsBase,
 } from "@/lib/api";
 import type { FileView, JoinResponse, MessageView, RoomState, RoomView, WsEvent } from "@/lib/types";
+import { ThemeToggle } from "@/lib/theme";
 
 type Phase = "loading" | "gate" | "room" | "expired" | "notfound";
+type UploadProgress = { filename: string; receivedBytes: number; totalSizeBytes: number };
 
 const OWNER_KEY_PREFIX = "droproom-owner-";
+const field = "field w-full rounded-xl px-3 py-2 text-sm outline-none transition";
 
 function ownerStorageKey(token: string): string {
   return `${OWNER_KEY_PREFIX}${token}`;
@@ -30,6 +47,7 @@ export default function RoomClient({ token, ownerToken }: { token: string; owner
   const [joinPassword, setJoinPassword] = useState("");
   const [joinName, setJoinName] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const [state, setState] = useState<RoomState | null>(null);
   const [role, setRole] = useState<string | null>(null);
@@ -38,16 +56,33 @@ export default function RoomClient({ token, ownerToken }: { token: string; owner
   const wsRef = useRef<WebSocket | null>(null);
   const secondsRef = useRef(0);
   const leavingRef = useRef(false);
+  const phaseRef = useRef<Phase>("loading");
+  const startedRef = useRef(false);
   const [chatDraft, setChatDraft] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
   const [editName, setEditName] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const [removePassword, setRemovePassword] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [updatingPermissions, setUpdatingPermissions] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+const [deletingRoom, setDeletingRoom] = useState(false);
+const [fileToDelete, setFileToDelete] = useState<FileView | null>(null);
+const [deletingFile, setDeletingFile] = useState(false);
+
 
   useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    // React Strict Mode intentionally mounts effects twice in development.
+    // A join is stateful (it claims a room slot), so only initiate it once.
+    if (startedRef.current) return;
+    startedRef.current = true;
     const stored = window.sessionStorage.getItem(ownerStorageKey(token));
     const owner = ownerToken ?? stored;
     if (owner) {
@@ -151,6 +186,9 @@ export default function RoomClient({ token, ownerToken }: { token: string; owner
           break;
         case "FILE_UPLOAD_COMPLETED": {
           const f = msg.payload.file;
+          setUploadProgress((current) =>
+            current?.filename === f.originalFilename ? null : current
+          );
           setState((prev) =>
             prev
               ? {
@@ -171,6 +209,13 @@ export default function RoomClient({ token, ownerToken }: { token: string; owner
           );
           break;
         }
+        case "FILE_UPLOAD_PROGRESS":
+          setUploadProgress({
+            filename: msg.payload.filename,
+            receivedBytes: msg.payload.receivedBytes,
+            totalSizeBytes: msg.payload.totalSizeBytes,
+          });
+          break;
         case "FILE_DELETED":
           setState((prev) => {
             if (!prev) return prev;
@@ -264,14 +309,14 @@ export default function RoomClient({ token, ownerToken }: { token: string; owner
       }
     };
     ws.onclose = () => {
-      if (phase === "room") scheduleReconnect(ws);
+      if (phaseRef.current === "room") scheduleReconnect(ws);
     };
   }
 
   function scheduleReconnect(dead: WebSocket) {
     window.setTimeout(() => {
       if (leavingRef.current) return;
-      if (wsRef.current !== dead || phase !== "room") return;
+      if (wsRef.current !== dead || phaseRef.current !== "room") return;
       api
         .joinRoom(token, {})
         .then((jr) => {
@@ -323,24 +368,59 @@ export default function RoomClient({ token, ownerToken }: { token: string; owner
     setActionError(null);
     try {
       for (const f of files) {
-        await api.uploadFile(token, f);
+        await uploadInChunks(f);
       }
+      setNotice(files.length === 1 ? "File uploaded." : `${files.length} files uploaded.`);
     } catch (err) {
       setActionError((err as ApiError).message ?? "Upload failed");
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       setFileInputKey((k) => k + 1);
     }
   }
 
-  async function onDeleteFile(f: FileView) {
-    setActionError(null);
+  async function uploadInChunks(file: File) {
+    if (file.size === 0) throw new Error("Empty files can’t be uploaded.");
+    const assumedChunkSize = 8 * 1024 * 1024;
+    const totalChunks = Math.ceil(file.size / assumedChunkSize);
+    const session = await api.createUploadSession(token, {
+      filename: file.name,
+      contentType: file.type || null,
+      totalSizeBytes: file.size,
+      totalChunks,
+    });
     try {
-      await api.deleteFile(token, f.id);
-    } catch (err) {
-      setActionError((err as ApiError).message ?? "Delete failed");
+      for (let index = 0; index < session.totalChunks; index += 1) {
+        const start = index * session.chunkSizeBytes;
+        const status = await api.uploadChunk(token, session.uploadId, index, file.slice(start, start + session.chunkSizeBytes));
+        setUploadProgress({ filename: file.name, receivedBytes: status.receivedBytes, totalSizeBytes: file.size });
+      }
+      await api.completeUploadSession(token, session.uploadId, session.totalChunks);
+    } catch (error) {
+      void api.abortUploadSession(token, session.uploadId).catch(() => undefined);
+      throw error;
     }
   }
+
+  async function onConfirmDeleteFile() {
+  if (!fileToDelete) return;
+
+  setDeletingFile(true);
+  setActionError(null);
+  setNotice(null);
+
+  try {
+    await api.deleteFile(token, fileToDelete.id);
+
+    setFileToDelete(null);
+    setNotice("File deleted successfully.");
+  } catch (err) {
+    setActionError((err as ApiError).message ?? "Delete failed");
+  } finally {
+    setDeletingFile(false);
+  }
+}
 
   async function onSaveSettings(e: FormEvent) {
     e.preventDefault();
@@ -362,13 +442,36 @@ export default function RoomClient({ token, ownerToken }: { token: string; owner
     }
   }
 
+  async function updatePermissions(guestUploadEnabled: boolean, guestDownloadEnabled: boolean) {
+    setActionError(null);
+    const previous = state?.room;
+    setUpdatingPermissions(true);
+    setState((current) => current ? {
+      ...current,
+      room: { ...current.room, guestUploadEnabled, guestDownloadEnabled },
+    } : current);
+    try {
+      await api.patchRoom(token, { guestUploadEnabled, guestDownloadEnabled });
+    } catch (err) {
+      if (previous) {
+        setState((current) => current ? { ...current, room: previous } : current);
+      }
+      setActionError((err as ApiError).message ?? "Could not update guest permissions");
+    } finally {
+      setUpdatingPermissions(false);
+    }
+  }
+
   async function onDeleteRoom() {
-    if (!window.confirm("Delete this room and all files now? This cannot be undone.")) return;
+    setDeletingRoom(true);
     try {
       await api.deleteRoom(token);
       setPhase("expired");
     } catch (err) {
       setActionError((err as ApiError).message ?? "Delete failed");
+      setDeleteDialogOpen(false);
+    } finally {
+      setDeletingRoom(false);
     }
   }
 
@@ -380,16 +483,13 @@ export default function RoomClient({ token, ownerToken }: { token: string; owner
 
   async function copyShareLink() {
     const url = `${window.location.origin}/r/${token}`;
-    await navigator.clipboard.writeText(url);
-    setActionError(null);
-  }
-
-  async function copyOwnerLink() {
-    const owner =
-      window.sessionStorage.getItem(ownerStorageKey(token)) ?? ownerToken;
-    if (!owner) return;
-    const url = `${window.location.origin}/r/${token}?owner=${owner}`;
-    await navigator.clipboard.writeText(url);
+    try {
+      await navigator.clipboard.writeText(url);
+      setNotice("Invite link copied.");
+      setActionError(null);
+    } catch {
+      setActionError("Couldn’t copy the link. Select it from your browser address bar instead.");
+    }
   }
 
   function onJoinGate(e: FormEvent) {
@@ -415,40 +515,47 @@ export default function RoomClient({ token, ownerToken }: { token: string; owner
   }
   if (phase === "gate" && view) {
     return (
-      <main className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center px-6 py-16">
-        <p className="text-sm uppercase tracking-widest text-zinc-400">Private room</p>
-        <h1 className="mt-2 text-3xl font-bold">{view.name ?? `Code ${view.roomCode}`}</h1>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Room code: {view.roomCode}</p>
-        {joinError && <p className="mt-4 text-sm text-red-600">{joinError}</p>}
-        <form onSubmit={onJoinGate} className="mt-6 w-full space-y-3">
-          <label className="block">
-            <span className="mb-1 block text-sm text-zinc-500 dark:text-zinc-400">Your name (optional)</span>
-            <input
-              value={joinName}
-              onChange={(e) => setJoinName(e.target.value)}
-              maxLength={60}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            />
-          </label>
-          {view.passwordRequired && (
-            <label className="block">
-              <span className="mb-1 block text-sm text-zinc-500 dark:text-zinc-400">Room password</span>
-              <input
-                type="password"
-                value={joinPassword}
-                onChange={(e) => setJoinPassword(e.target.value)}
-                className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-              />
-            </label>
-          )}
-          <button
-            type="submit"
-            disabled={joinBusy}
-            className="w-full rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {joinBusy ? "Joining…" : "Enter room"}
-          </button>
-        </form>
+      <main className="app-shell flex min-h-dvh flex-col">
+        <TopBar />
+        <div className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center px-6 py-16">
+          <div className="surface reveal w-full rounded-3xl p-7 text-center">
+            <span className="chip mx-auto grid h-11 w-11 place-items-center rounded-2xl">
+              <Flame size={19} />
+            </span>
+            <p className="mt-4 text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">
+              Private room
+            </p>
+            <h1 className="font-display mt-1 text-2xl font-semibold tracking-tight">
+              {view.name ?? `Code ${view.roomCode}`}
+            </h1>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">Room code: {view.roomCode}</p>
+            {joinError && <p className="banner-danger mt-4 rounded-xl px-3 py-2 text-sm">{joinError}</p>}
+            <form onSubmit={onJoinGate} className="mt-6 w-full space-y-3 text-left">
+              <label className="block">
+                <span className="mb-1 block text-sm text-[var(--text-muted)]">Your name (optional)</span>
+                <input value={joinName} onChange={(e) => setJoinName(e.target.value)} maxLength={60} className={field} />
+              </label>
+              {view.passwordRequired && (
+                <label className="block">
+                  <span className="mb-1 block text-sm text-[var(--text-muted)]">Room password</span>
+                  <input
+                    type="password"
+                    value={joinPassword}
+                    onChange={(e) => setJoinPassword(e.target.value)}
+                    className={field}
+                  />
+                </label>
+              )}
+              <button
+                type="submit"
+                disabled={joinBusy}
+                className="btn-primary lift w-full rounded-xl px-4 py-2.5 font-semibold transition"
+              >
+                {joinBusy ? "Joining…" : "Enter room"}
+              </button>
+            </form>
+          </div>
+        </div>
       </main>
     );
   }
@@ -459,249 +566,322 @@ export default function RoomClient({ token, ownerToken }: { token: string; owner
   const isOwner = role === "OWNER";
   const canUpload = isOwner || state.room.guestUploadEnabled;
   const canDownload = isOwner || state.room.guestDownloadEnabled;
+  const expiringSoon = secondsLeft < 300;
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs uppercase tracking-widest text-zinc-400">
-            {isOwner ? "You're the owner" : "Guest"} · code {state.room.roomCode}
-          </p>
-          <h1 className="mt-1 text-3xl font-bold">{state.room.name ?? "Untitled room"}</h1>
-        </div>
-        <div className="text-right">
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Expires in <span className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">{formatCountdown(secondsLeft)}</span>
-          </p>
-          <div className="mt-2 flex gap-2">
-            <button
-              onClick={() => void copyShareLink()}
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-            >
-              Copy invite link
-            </button>
-            {isOwner && (
-              <button
-                onClick={() => void copyOwnerLink()}
-                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-              >
-                Copy owner link
-              </button>
-            )}
+    <main className="app-shell w-full flex-1 px-4 py-7 sm:px-6 sm:py-10">
+      <div className="mx-auto max-w-6xl">
+        <TopBar compact />
+        <div className="surface reveal mt-4 rounded-3xl p-5 sm:p-7">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="chip inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-widest">
+                <span className="grid h-5 w-5 place-items-center rounded-full">
+                  {isOwner ? <Crown size={12} /> : <UsersRound size={12} />}
+                </span>
+                {isOwner ? "You're the owner" : "Guest"} · code {state.room.roomCode}
+              </p>
+              <h1 className="font-display mt-2 text-3xl font-semibold tracking-tight">
+                {state.room.name ?? "Untitled room"}
+              </h1>
+            </div>
+            <div className="ml-auto flex flex-col items-end text-right">
+              <p className="flex items-center justify-end gap-1.5 text-sm text-[var(--text-muted)]">
+                <Clock3 size={15} /> Expires in{" "}
+                <span className="font-mono font-semibold text-[var(--text)]">{formatCountdown(secondsLeft)}</span>
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => void copyShareLink()}
+                  className="btn-outline lift mt-2 flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition"
+                >
+                  <Copy size={15} /> Copy invite
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
 
-      {secondsLeft < 300 && phase === "room" && (
-        <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-          This room expires in {formatCountdown(secondsLeft)}. Download anything you need soon.
-        </div>
-      )}
-      {actionError && (
-        <div className="mt-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-          {actionError}
-        </div>
-      )}
+        {expiringSoon && phase === "room" && (
+          <div className="banner-warning mt-4 flex items-center gap-2 rounded-lg px-4 py-3 text-sm">
+            <AlertTriangle size={16} className="shrink-0" />
+            This room expires in {formatCountdown(secondsLeft)}. Download anything you need soon.
+          </div>
+        )}
+        {actionError && (
+          <div className="banner-danger mt-4 rounded-lg px-4 py-3 text-sm">{actionError}</div>
+        )}
+        {notice && (
+          <div className="banner-success mt-4 flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm shadow-sm">
+            <span>{notice}</span>
+            <button onClick={() => setNotice(null)} className="font-medium hover:opacity-70" aria-label="Dismiss message">
+              ×
+            </button>
+          </div>
+        )}
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
-        <section className="space-y-4">
-          <div className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold">
-                Files{" "}
-                <span className="text-sm font-normal text-zinc-400">
-                  {state.room.fileCount} · {formatBytes(state.room.storageUsedBytes)}
-                </span>
-              </h2>
-              {canUpload && (
-                <label className="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
-                  {uploading ? "Uploading…" : "Upload files"}
-                  <input key={fileInputKey} type="file" multiple className="hidden" onChange={(e) => void onUpload(e)} disabled={uploading} />
-                </label>
+        <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <section className="space-y-4">
+            <div className="surface reveal-delay rounded-3xl p-5 sm:p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="font-display flex items-center gap-2 font-semibold">
+                  <span className="chip grid h-9 w-9 place-items-center rounded-xl">
+                    <FileUp size={18} />
+                  </span>
+                  Files{" "}
+                  <span className="text-sm font-normal text-[var(--text-muted)]">
+                    {state.room.fileCount} · {formatBytes(state.room.storageUsedBytes)}
+                  </span>
+                </h2>
+                {canUpload && (
+                  <label className="btn-primary lift flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition">
+                    <FileUp size={16} />
+                    {uploading ? "Uploading…" : "Upload files"}
+                    <input
+                      key={fileInputKey}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => void onUpload(e)}
+                      disabled={uploading}
+                    />
+                  </label>
+                )}
+              </div>
+              {!canUpload && (
+                <p className="mt-2 text-sm text-[var(--text-muted)]">The owner has disabled guest uploads.</p>
+              )}
+              {uploadProgress && (
+                <div className="chip mt-4 rounded-xl p-3">
+                  <div className="flex justify-between gap-3 text-xs">
+                    <span className="truncate">Uploading {uploadProgress.filename}</span>
+                    <span>{Math.round((uploadProgress.receivedBytes / uploadProgress.totalSizeBytes) * 100)}%</span>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full" style={{ background: "var(--border)" }}>
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${Math.min(100, (uploadProgress.receivedBytes / uploadProgress.totalSizeBytes) * 100)}%`,
+                        background: "var(--accent)",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              {state.files.length === 0 ? (
+                <div
+                  className="mt-4 rounded-2xl border border-dashed py-10 text-center text-sm text-[var(--text-muted)]"
+                  style={{ borderColor: "var(--border)" }}
+                >
+                  No files yet. {canUpload ? "Upload something to get started." : "Check back when someone adds a file."}
+                </div>
+              ) : (
+                <ul className="mt-4 divide-y" style={{ borderColor: "var(--border)" }}>
+                  {state.files.map((f) => (
+                    <li key={f.id} className="flex items-center gap-3 py-3" style={{ borderColor: "var(--border)" }}>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium">{f.originalFilename}</p>
+                        <p className="text-xs text-[var(--text-muted)]">
+                          {formatBytes(f.sizeBytes)} · by {f.uploadedByName ?? "someone"} ·{" "}
+                          {f.downloadCount} download{f.downloadCount === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      {canDownload ? (
+                        <a
+                          href={api.downloadUrl(token, f.id)}
+                          className="btn-outline lift flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition"
+                        >
+                          <Download size={15} /> Download
+                        </a>
+                      ) : (
+                        <span className="text-xs text-[var(--text-muted)]">downloads off</span>
+                      )}
+                      {isOwner && (
+  <button
+    onClick={() => setFileToDelete(f)}
+    className="banner-danger grid h-9 w-9 place-items-center rounded-xl transition hover:opacity-80"
+    aria-label={`Delete ${f.originalFilename}`}
+  >
+    <Trash2 size={16} />
+  </button>
+)}
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
-            {!canUpload && (
-              <p className="mt-2 text-sm text-zinc-500">The owner has disabled guest uploads.</p>
+
+            {view?.passwordRequired !== undefined && (
+              <div className="rounded-2xl border p-4 text-sm text-[var(--text-muted)]" style={{ borderColor: "var(--border)" }}>
+                Guests join with the room code{view.passwordRequired ? " and the room password" : ""} —
+                share it however you like. Files disappear when the room expires.
+              </div>
             )}
-            {state.files.length === 0 ? (
-              <p className="mt-4 py-8 text-center text-sm text-zinc-400">No files yet.</p>
-            ) : (
-              <ul className="mt-4 divide-y divide-zinc-100 dark:divide-zinc-800">
-                {state.files.map((f) => (
-                  <li key={f.id} className="flex items-center gap-3 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{f.originalFilename}</p>
-                      <p className="text-xs text-zinc-400">
-                        {formatBytes(f.sizeBytes)} · by {f.uploadedByName ?? "someone"} ·{" "}
-                        {f.downloadCount} download{f.downloadCount === 1 ? "" : "s"}
-                      </p>
-                    </div>
-                    {canDownload ? (
-                      <a
-                        href={api.downloadUrl(token, f.id)}
-                        className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-                      >
-                        Download
-                      </a>
-                    ) : (
-                      <span className="text-xs text-zinc-400">downloads off</span>
-                    )}
-                    {isOwner && (
-                      <button
-                        onClick={() => void onDeleteFile(f)}
-                        className="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950"
-                      >
-                        Delete
-                      </button>
+          </section>
+
+          <aside className="space-y-4">
+            <section className="surface rounded-3xl p-5">
+              <h2 className="font-display flex items-center gap-2 font-semibold">
+                <UsersRound size={18} style={{ color: "var(--accent)" }} /> People
+              </h2>
+              <ul className="mt-2 space-y-1.5 text-sm">
+                {state.members.map((m) => (
+                  <li key={m.sessionId} className="flex items-center justify-between">
+                    <span className="flex items-center gap-2 truncate">
+                      <span className="live-dot h-1.5 w-1.5 rounded-full" style={{ background: "var(--accent)" }} />
+                      {m.displayName ?? "Anonymous"}
+                    </span>
+                    {m.role === "OWNER" && (
+                      <span className="chip rounded px-1.5 py-0.5 text-xs">owner</span>
                     )}
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
-
-          {view?.passwordRequired !== undefined && (
-            <div className="rounded-2xl border border-zinc-200 p-4 text-sm text-zinc-500 dark:border-zinc-800">
-              Guests join with the room code{view.passwordRequired ? " and the room password" : ""} —
-              share it however you like. Files disappear when the room expires.
-            </div>
-          )}
-        </section>
-
-        <aside className="space-y-4">
-          <section className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-            <h2 className="font-semibold">People</h2>
-            <ul className="mt-2 space-y-1.5 text-sm">
-              {state.members.map((m) => (
-                <li key={m.sessionId} className="flex items-center justify-between">
-                  <span className="truncate">{m.displayName ?? "Anonymous"}</span>
-                  {m.role === "OWNER" && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700 dark:bg-amber-900 dark:text-amber-200">owner</span>}
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          {isOwner && (
-            <section className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-              <h2 className="font-semibold">Owner settings</h2>
-              <div className="mt-3 space-y-2 text-sm">
-                <label className="flex items-center justify-between">
-                  <span>Guests can upload</span>
-                  <input
-                    type="checkbox"
-                    disabled={editing}
-                    checked={state.room.guestUploadEnabled}
-                    onChange={(e) => {
-                      void api.patchRoom(token, {
-                        guestUploadEnabled: e.target.checked,
-                        guestDownloadEnabled: state.room.guestDownloadEnabled,
-                      });
-                    }}
-                  />
-                </label>
-                <label className="flex items-center justify-between">
-                  <span>Guests can download</span>
-                  <input
-                    type="checkbox"
-                    disabled={editing}
-                    checked={state.room.guestDownloadEnabled}
-                    onChange={(e) => {
-                      void api.patchRoom(token, {
-                        guestUploadEnabled: state.room.guestUploadEnabled,
-                        guestDownloadEnabled: e.target.checked,
-                      });
-                    }}
-                  />
-                </label>
-                {editing ? (
-                  <form onSubmit={onSaveSettings} className="space-y-2 pt-1">
-                    <input
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      maxLength={120}
-                      className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                      placeholder="Room name"
-                    />
-                    <input
-                      type="password"
-                      value={editPassword}
-                      onChange={(e) => setEditPassword(e.target.value)}
-                      maxLength={128}
-                      className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                      placeholder={view?.passwordRequired ? "New password (leave blank to keep current)" : "Password (optional)"}
-                    />
-                    {view?.passwordRequired && (
-                      <label className="flex items-center justify-between text-sm">
-                        <span>Remove password</span>
-                        <input
-                          type="checkbox"
-                          checked={removePassword}
-                          onChange={(e) => setRemovePassword(e.target.checked)}
-                        />
-                      </label>
-                    )}
-                    <div className="flex gap-2">
-                      <button type="submit" className="rounded-lg bg-indigo-600 px-3 py-1.5 text-white hover:bg-indigo-700">
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditPassword("");
-                          setRemovePassword(false);
-                          setEditing(false);
-                        }}
-                        className="rounded-lg border border-zinc-300 px-3 py-1.5 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setEditName(state.room.name ?? "");
-                      setEditPassword("");
-                      setRemovePassword(false);
-                      setEditing(true);
-                    }}
-                    className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-1.5 text-center hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-                  >
-                    Edit room details
-                  </button>
-                )}
-                <button
-                  onClick={() => void onDeleteRoom()}
-                  className="mt-2 w-full rounded-lg border border-red-200 px-3 py-1.5 text-center text-red-600 hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950"
-                >
-                  Delete room now
-                </button>
-              </div>
             </section>
-          )}
 
-          {!isOwner && (
-            <button
-              onClick={onLeaveRoom}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-            >
-              Leave room
-            </button>
-          )}
+            <ChatPanel
+              messages={state.messages}
+              canDelete={isOwner}
+              onSend={(body) => wsSend({ type: "CHAT_SEND", payload: { body } })}
+              onDelete={(id) => wsSend({ type: "CHAT_DELETE", payload: { messageId: id } })}
+              draft={chatDraft}
+              setDraft={setChatDraft}
+            />
 
-          <ChatPanel
-            messages={state.messages}
-            canDelete={isOwner}
-            onSend={(body) => wsSend({ type: "CHAT_SEND", payload: { body } })}
-            onDelete={(id) => wsSend({ type: "CHAT_DELETE", payload: { messageId: id } })}
-            draft={chatDraft}
-            setDraft={setChatDraft}
-          />
-        </aside>
+            {isOwner && (
+              <section className="surface rounded-3xl p-5">
+                <h2 className="font-display flex items-center gap-2 font-semibold">
+                  <Settings2 size={18} style={{ color: "var(--accent)" }} /> Owner settings
+                </h2>
+                <div className="mt-3 space-y-2 text-sm">
+                  <PermissionControl
+                    label="Guest uploads"
+                    description="Let guests add files"
+                    enabled={state.room.guestUploadEnabled}
+                    disabled={editing || updatingPermissions}
+                    onChange={(enabled) => void updatePermissions(enabled, state.room.guestDownloadEnabled)}
+                  />
+                  <PermissionControl
+                    label="Guest downloads"
+                    description="Let guests save files"
+                    enabled={state.room.guestDownloadEnabled}
+                    disabled={editing || updatingPermissions}
+                    onChange={(enabled) => void updatePermissions(state.room.guestUploadEnabled, enabled)}
+                  />
+                  {editing ? (
+                    <form onSubmit={onSaveSettings} className="space-y-2 pt-1">
+                      <input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        maxLength={120}
+                        className={field}
+                        placeholder="Room name"
+                      />
+                      <input
+                        type="password"
+                        value={editPassword}
+                        onChange={(e) => setEditPassword(e.target.value)}
+                        maxLength={128}
+                        className={field}
+                        placeholder={view?.passwordRequired ? "New password (leave blank to keep current)" : "Password (optional)"}
+                      />
+                      {view?.passwordRequired && (
+                        <label className="flex items-center justify-between text-sm">
+                          <span>Remove password</span>
+                          <input
+                            type="checkbox"
+                            checked={removePassword}
+                            onChange={(e) => setRemovePassword(e.target.checked)}
+                          />
+                        </label>
+                      )}
+                      <div className="flex gap-2">
+                        <button type="submit" className="btn-primary lift rounded-lg px-3 py-1.5 transition">
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditPassword("");
+                            setRemovePassword(false);
+                            setEditing(false);
+                          }}
+                          className="btn-outline lift rounded-lg px-3 py-1.5 transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setEditName(state.room.name ?? "");
+                        setEditPassword("");
+                        setRemovePassword(false);
+                        setEditing(true);
+                      }}
+                      className="btn-outline lift mt-1 w-full rounded-lg px-3 py-1.5 text-center transition"
+                    >
+                      Edit room details
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setDeleteDialogOpen(true)}
+                    className="banner-danger mt-2 w-full rounded-lg px-3 py-1.5 text-center transition hover:opacity-85"
+                  >
+                    Delete room now
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {!isOwner && (
+              <button
+                onClick={onLeaveRoom}
+                className="btn-outline lift flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition"
+              >
+                <LogOut size={16} /> Leave room
+              </button>
+            )}
+          </aside>
+        </div>
       </div>
+      <DeleteRoomDialog
+  open={deleteDialogOpen}
+  busy={deletingRoom}
+  onCancel={() => setDeleteDialogOpen(false)}
+  onConfirm={() => void onDeleteRoom()}
+/>
+<DeleteFileDialog
+  file={fileToDelete}
+  busy={deletingFile}
+  onCancel={() => setFileToDelete(null)}
+  onConfirm={() => void onConfirmDeleteFile()}
+/>
     </main>
   );
 }
+
+function TopBar({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className={"flex items-center justify-between " + (compact ? "" : "px-1 py-2")}>
+  <Link
+    href="/"
+    className="font-display flex items-center gap-0 font-semibold tracking-tight"
+  >
+    <img
+      src="/logo.png"
+      alt="DropRoom"
+      className="h-12 w-12 object-contain"
+    />
+    <span className="-ml-2">DropRoom</span>
+  </Link>
+
+  <ThemeToggle />
+</div>
+  );
+}
+
 
 function ChatPanel({
   messages,
@@ -732,18 +912,20 @@ function ChatPanel({
   }
 
   return (
-    <section className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-      <h2 className="font-semibold">Chat</h2>
+    <section className="surface rounded-3xl p-5">
+      <h2 className="font-display flex items-center gap-2 font-semibold">
+        <MessageCircle size={18} style={{ color: "var(--accent)" }} /> Chat
+      </h2>
       <div ref={boxRef} className="mt-2 max-h-64 space-y-2 overflow-y-auto pr-1 text-sm">
-        {messages.length === 0 && <p className="text-zinc-400">No messages yet.</p>}
+        {messages.length === 0 && <p className="text-[var(--text-muted)]">No messages yet.</p>}
         {messages.map((m) => (
           <div key={m.id} className="group">
-            <p className="text-xs text-zinc-400">{m.displayName ?? "Anonymous"}</p>
+            <p className="text-xs text-[var(--text-muted)]">{m.displayName ?? "Anonymous"}</p>
             <p className="break-words">{m.body}</p>
             {canDelete && (
               <button
                 onClick={() => onDelete(m.id)}
-                className="text-xs text-zinc-400 opacity-0 transition group-hover:opacity-100 hover:text-red-500"
+                className="text-xs text-[var(--text-muted)] opacity-0 transition group-hover:opacity-100 hover:text-[var(--accent)]"
               >
                 delete
               </button>
@@ -756,10 +938,10 @@ function ChatPanel({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           maxLength={1000}
-          className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          className={field + " flex-1 rounded-xl px-3 py-2.5"}
           placeholder="Type a message…"
         />
-        <button type="submit" className="rounded-lg bg-zinc-800 px-3 py-2 text-sm text-white hover:bg-zinc-900 dark:bg-zinc-200 dark:text-zinc-900 dark:hover:bg-white">
+        <button type="submit" className="btn-primary lift rounded-xl px-3 py-2 text-sm font-semibold transition">
           Send
         </button>
       </form>
@@ -767,9 +949,166 @@ function ChatPanel({
   );
 }
 
+function PermissionControl({
+  label,
+  description,
+  enabled,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  enabled: boolean;
+  disabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      disabled={disabled}
+      onClick={() => onChange(!enabled)}
+      className="btn-outline lift flex w-full items-center justify-between rounded-2xl px-3.5 py-3 text-left transition disabled:opacity-50"
+    >
+      <span>
+        <span className="block font-semibold">{label}</span>
+        <span className="mt-0.5 block text-xs text-[var(--text-muted)]">{description}</span>
+      </span>
+      <span className="relative h-6 w-11 rounded-full transition" style={{ background: enabled ? "var(--accent)" : "var(--border)" }}>
+  <span
+    className="absolute top-1 h-4 w-4 rounded-full shadow transition"
+    style={{
+      left: enabled ? "1.5rem" : "0.25rem",
+      background: enabled ? "var(--accent-contrast)" : "#ffffff",
+    }}
+  />
+</span>
+    </button>
+  );
+}
+
+function DeleteRoomDialog({
+  open,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center p-4 backdrop-blur-sm"
+      style={{ background: "rgba(15, 6, 6, 0.55)" }}
+      role="presentation"
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-room-title"
+        className="surface-solid reveal w-full max-w-md rounded-3xl p-6 shadow-2xl"
+      >
+        <div className="banner-danger grid h-11 w-11 place-items-center rounded-2xl">
+          <AlertTriangle size={20} />
+        </div>
+        <h2 id="delete-room-title" className="font-display mt-4 text-xl font-semibold">
+          Delete this room?
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
+          Every file and chat message will be removed now. This action cannot be undone.
+        </p>
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="btn-outline lift rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50"
+          >
+            Keep room
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="banner-danger lift rounded-xl px-4 py-2.5 text-sm font-semibold transition hover:opacity-85 disabled:opacity-50"
+          >
+            {busy ? "Deleting…" : "Delete room"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteFileDialog({
+  file,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  file: FileView | null;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!file) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center p-4 backdrop-blur-sm"
+      style={{ background: "rgba(15, 6, 6, 0.55)" }}
+      role="presentation"
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-file-title"
+        className="surface-solid reveal w-full max-w-md rounded-3xl p-6 shadow-2xl"
+      >
+        <div className="banner-danger grid h-11 w-11 place-items-center rounded-2xl">
+          <Trash2 size={20} />
+        </div>
+        <h2 id="delete-file-title" className="font-display mt-4 text-xl font-semibold">
+          Delete this file?
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
+          <span className="font-medium text-[var(--text)]">{file.originalFilename}</span> will be
+          removed for everyone in this room. This action cannot be undone.
+        </p>
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="btn-outline lift rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50"
+          >
+            Keep file
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="banner-danger lift rounded-xl px-4 py-2.5 text-sm font-semibold transition hover:opacity-85 disabled:opacity-50"
+          >
+            {busy ? "Deleting…" : "Delete file"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LoadingScreen({ label }: { label: string }) {
   return (
-    <main className="flex flex-1 items-center justify-center text-sm text-zinc-400">{label}</main>
+    <main className="app-shell flex flex-1 items-center justify-center text-sm text-[var(--text-muted)]">
+      <span className="flex items-center gap-2">
+        <Flame size={16} className="live-dot" style={{ color: "var(--accent)" }} />
+        {label}
+      </span>
+    </main>
   );
 }
 
@@ -783,14 +1122,16 @@ function CenteredCard({
   withHome?: boolean;
 }) {
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-6 text-center">
-      <h1 className="text-3xl font-bold">{title}</h1>
-      <p className="mt-3 text-zinc-500 dark:text-zinc-400">{body}</p>
-      {withHome && (
-        <Link href="/" className="mt-6 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-700">
-          Create your own room
-        </Link>
-      )}
+    <main className="app-shell flex min-h-dvh flex-1 items-center justify-center px-6">
+      <div className="surface reveal w-full max-w-md rounded-3xl p-8 text-center">
+        <h1 className="font-display text-3xl font-semibold">{title}</h1>
+        <p className="mt-3 text-[var(--text-muted)]">{body}</p>
+        {withHome && (
+          <Link href="/" className="btn-primary lift mt-6 inline-block rounded-xl px-4 py-2 font-medium transition">
+            Create your own room
+          </Link>
+        )}
+      </div>
     </main>
   );
 }

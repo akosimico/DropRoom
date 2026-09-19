@@ -24,6 +24,10 @@ class StorageBackend(Protocol):
     async def exists(self, key: str) -> bool:
         ...
 
+    async def list_keys(self, prefix: str = "") -> list[str]:
+        """Return all object keys under an optional key prefix."""
+        ...
+
 
 async def drain_chunks(data: AsyncIterator[bytes], chunk_cb) -> int:
     total = 0

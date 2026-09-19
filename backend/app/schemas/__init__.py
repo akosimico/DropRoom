@@ -124,5 +124,32 @@ class FileListResponse(BaseModel):
     maxFilesPerRoom: int
 
 
+class UploadSessionCreate(CamelModel):
+    filename: str = Field(max_length=255)
+    content_type: str | None = None
+    total_size_bytes: int = Field(gt=0)
+    total_chunks: int = Field(gt=0)
+
+
+class UploadSessionCreated(BaseModel):
+    uploadId: int
+    filename: str
+    totalSizeBytes: int
+    totalChunks: int
+    chunkSizeBytes: int
+
+
+class UploadSessionStatus(BaseModel):
+    uploadId: int
+    filename: str
+    totalSizeBytes: int
+    receivedBytes: int
+    status: str
+
+
+class UploadSessionComplete(BaseModel):
+    totalChunks: int = Field(gt=0)
+
+
 class ErrorResponse(BaseModel):
     detail: str

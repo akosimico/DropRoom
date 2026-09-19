@@ -67,3 +67,14 @@ class LocalStorageBackend:
 
     async def exists(self, key: str) -> bool:
         return self._path(key).exists()
+
+    async def list_keys(self, prefix: str = "") -> list[str]:
+        if not self.root.exists():
+            return []
+        out: list[str] = []
+        for path in sorted(self.root.rglob("*")):
+            if path.is_file():
+                rel = str(path.relative_to(self.root))
+                if not prefix or rel.startswith(prefix):
+                    out.append(rel)
+        return out

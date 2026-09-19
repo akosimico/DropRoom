@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import csrf, files, health, messages, rooms, websocket
+from app.api import csrf, files, health, messages, rooms, uploads, websocket
 from app.core import errors
 from app.core.config import get_settings
 from app.db.base import Base
@@ -30,14 +30,20 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("auto table creation failed (database may not be reachable yet)")
     from app.cleanup.scheduler import scheduler
+    from app.jobs import register_default_handlers
+    from app.jobs.queue import get_job_queue
 
+    job_queue = get_job_queue()
+    register_default_handlers(job_queue)
     if settings.environment != "test":
+        job_queue.start()
         scheduler.start()
     try:
         yield
     finally:
         if settings.environment != "test":
             await scheduler.stop()
+            await job_queue.stop()
 
 
 def create_app() -> FastAPI:
@@ -61,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(csrf.router, prefix=settings.api_prefix)
     app.include_router(rooms.router, prefix=settings.api_prefix)
     app.include_router(files.router, prefix=settings.api_prefix)
+    app.include_router(uploads.router, prefix=settings.api_prefix)
     app.include_router(messages.router, prefix=settings.api_prefix)
     app.include_router(websocket.router)
 

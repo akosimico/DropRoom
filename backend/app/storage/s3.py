@@ -53,7 +53,7 @@ class S3StorageBackend:
                     fh.write(chunk)
                     total += len(chunk)
 
-            async def _upload() -> None:
+            def _upload() -> None:
                 with open(tmp, "rb") as src:
                     self._client.upload_fileobj(src, self.bucket, key)
 
@@ -91,7 +91,7 @@ class S3StorageBackend:
         return await self._run(_head)
 
     async def delete(self, key: str) -> None:
-        async def _delete() -> None:
+        def _delete() -> None:
             try:
                 self._client.delete_object(Bucket=self.bucket, Key=key)
             except Exception:
@@ -101,6 +101,20 @@ class S3StorageBackend:
 
     async def exists(self, key: str) -> bool:
         return await self.head(key) != -1
+
+    async def list_keys(self, prefix: str = "") -> list[str]:
+        def _list() -> list[str]:
+            keys: list[str] = []
+            paginator = self._client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    keys.append(obj["Key"])
+            return keys
+
+        try:
+            return await self._run(_list)
+        except Exception:
+            return []
 
 
 def get_storage_backend():

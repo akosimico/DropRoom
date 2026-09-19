@@ -1,4 +1,4 @@
-import type { JoinResponse, RoomCreated, RoomView, FileView } from "./types";
+import type { JoinResponse, RoomCreated, RoomView, FileView, UploadSessionCreated, UploadSessionStatus } from "./types";
 
 export const CSRF_COOKIE = "dr_csrf";
 
@@ -112,6 +112,33 @@ export const api = {
     return request(`/api/v1/rooms/${encodeURIComponent(token)}/files`, {
       method: "POST",
       body: form,
+    }, true);
+  },
+
+  createUploadSession(token: string, body: { filename: string; contentType: string | null; totalSizeBytes: number; totalChunks: number }): Promise<UploadSessionCreated> {
+    return request(`/api/v1/rooms/${encodeURIComponent(token)}/uploads`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }, true);
+  },
+
+  uploadChunk(token: string, uploadId: number, index: number, chunk: Blob): Promise<UploadSessionStatus> {
+    return request(`/api/v1/rooms/${encodeURIComponent(token)}/uploads/${uploadId}/chunks/${index}`, {
+      method: "PUT",
+      body: chunk,
+    }, false);
+  },
+
+  completeUploadSession(token: string, uploadId: number, totalChunks: number): Promise<FileView> {
+    return request(`/api/v1/rooms/${encodeURIComponent(token)}/uploads/${uploadId}/complete`, {
+      method: "POST",
+      body: JSON.stringify({ totalChunks }),
+    }, true);
+  },
+
+  abortUploadSession(token: string, uploadId: number): Promise<{ ok: boolean }> {
+    return request(`/api/v1/rooms/${encodeURIComponent(token)}/uploads/${uploadId}`, {
+      method: "DELETE",
     }, true);
   },
 

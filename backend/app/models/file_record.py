@@ -17,6 +17,7 @@ class FileRecord(Base, TimestampMixin):
     storage_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     content_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    total_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default=FileStatus.CONFIRMED.value, index=True
     )

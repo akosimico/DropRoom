@@ -61,7 +61,7 @@ async def cleanup_room(db: AsyncSession, storage: StorageBackend, room: Room) ->
 
 
 async def _delete_content(db: AsyncSession, storage: StorageBackend, room_id: int) -> None:
-    keys = await file_repository.list_all_storage_keys(db, room_id)
+    keys = await file_repository.list_room_storage_keys(db, room_id)
     for key in keys:
         await storage.delete(key)
     await file_repository.delete_file_records(db, room_id)
